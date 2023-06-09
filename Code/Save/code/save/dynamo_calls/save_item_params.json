@@ -1,0 +1,13 @@
+{
+    "Item": { 
+        "guid_str": {
+            "S": "placeholder"
+        },
+        "paragraph_html_str": {
+            "S": "placeholder"
+        }
+    }, 
+    "ReturnConsumedCapacity": "TOTAL", 
+    "TableName": "nouns_verbs_and_adjectives",
+    "ConditionExpression": "attribute_not_exists(guid_str)"
+}

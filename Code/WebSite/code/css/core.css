@@ -1,0 +1,25 @@
+
+/*******reset****************/
+ul{
+	list-style: none;
+}
+/*******structure***********/
+html, 
+body{
+	color: #626963;
+	background-color: cadetblue;
+}
+mark {
+	 background-color: #b9c7bc;
+    color: #6e736f;
+    font-style: italic;
+    font-weight: bold;
+    padding: 0px 2px;
+}
+/*******actionable*********/
+[data-showing="not_showing"]{
+	visibility: hidden;
+}
+[data-showing="showing"]{
+	visibility: visible;
+}

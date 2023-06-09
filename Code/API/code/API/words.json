@@ -1,0 +1,5 @@
+{
+	"NOUN_ARR": ["tree", "book", "cup", "table", "xbox"],
+	"VERB_ARR": ["jump", "dance", "sing", "walk", "talk"],
+	"ADJECTIVE_ARR": ["excellent", "amazing", "wonderful", "terrible", "wicked"]
+}

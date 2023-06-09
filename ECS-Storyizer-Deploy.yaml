@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template to build the ECS Parts for DevOps SPL-208 ECS
+Parameters:
+  QwiklabLocale:
+    Default: en
+    Description: >-
+      The locale of the student will be passed in to this parameter via the
+      Qwiklab platform (via the student's browser)
+    Type: String
+  ECRsiteURIPram:
+    Description: The ECR Repo URI for the Storyizer/Website. (:latest Tag will be applied)
+    Type: String
+  ECRapiURIPram:
+    Description: The ECR Repo URI for the Storyizer/API. (:latest Tag will be applied)
+    Type: String
+  ECRsaveURIPram:
+    Description: The ECR Repo URI for the Storyizer/Save. (:latest Tag will be applied)
+    Type: String
+  BaseStack:
+    Description: The Name of the Stack that Qwiklabs had Launched for you
+    Type: String
+
+Resources:
+  # ALB Listener (fwd / to Website)
+  StoryizerECSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref WebSiteTG
+      LoadBalancerArn:
+        Fn::ImportValue: !Sub ${BaseStack}-elbRef
+      Port: '80'
+      Protocol: HTTP
+  # Fwd /save_paragraph/* to Save API
+  SaveListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn:
+      - StoryizerECSListener
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref saveTG
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "/save_paragraph/*"
+      ListenerArn: !Ref StoryizerECSListener
+      Priority: 1
+  # Fwd /get_random_word/* to Words API
+  ApiListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn:
+      - StoryizerECSListener
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref apiTG
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "/get_random_word/*"
+      ListenerArn: !Ref StoryizerECSListener
+      Priority: 2
+
+  # Defining teh ECS Tasks - Specs on what makes the app
+  SiteECStask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: Storyizer-Site
+      ContainerDefinitions:
+      - Name: Storyizer-Site
+        Cpu: '10'
+        Essential: true
+        Image: !Sub ${ECRsiteURIPram}:latest
+        Memory: 300
+        PortMappings:
+         - ContainerPort: 80
+        Environment:
+         - Name: Port
+           Value: 80
+         - Name: ServerName
+           Value: Storyizer-site
+         - Name: APIELB
+           Value:
+             Fn::ImportValue: !Sub ${BaseStack}-ELBDNS
+         - Name: SaveELB
+           Value:
+             Fn::ImportValue: !Sub ${BaseStack}-ELBDNS
+# @TODO  https://docs.aws.amazon.com/AmazonECS/latest/APIReference//API_ContainerDefinition.html
+#        LogConfiguration:
+#          LogDriver: awslogs
+#          Options:
+#            awslogs-group: !Ref 'CloudwatchLogsGroup'
+#            awslogs-region: !Ref 'AWS::Region'
+#            awslogs-stream-prefix: ecs-storyizer-site
+  ApiECStask:
+   Type: AWS::ECS::TaskDefinition
+   DependsOn:
+     - SiteECStask
+   Properties:
+     Family: Storyizer-API
+     ContainerDefinitions:
+       - Name: Storyizer-API
+         Cpu: 10
+         Essential: true
+         Image: !Sub ${ECRapiURIPram}:latest
+         Memory: 200
+         PortMappings:
+           - ContainerPort: 81
+         Environment:
+          - Name: Port
+            Value: 82
+          - Name: NVM_DIR
+            Value: /usr/local/nvm
+          - Name: NODE_VERSION
+            Value: 6.10.3
+        # @TODO  https://docs.aws.amazon.com/AmazonECS/latest/APIReference//API_ContainerDefinition.html
+        #        LogConfiguration:
+        #          LogDriver: awslogs
+        #          Options:
+        #            awslogs-group: !Ref 'CloudwatchLogsGroup'
+        #            awslogs-region: !Ref 'AWS::Region'
+        #            awslogs-stream-prefix: ecs-storyizer-api
+  SaveECStask:
+   Type: AWS::ECS::TaskDefinition
+   DependsOn:
+     - SiteECStask
+     - ApiECStask
+   Properties:
+     Family: Storyizer-Save
+     TaskRoleArn:
+       Fn::ImportValue: !Sub ${BaseStack}-AppRole
+     ContainerDefinitions:
+       - Name: Storyizer-Save
+         Cpu: 10
+         Essential: true
+         Image: !Sub ${ECRsaveURIPram}:latest
+         Memory: 200
+         PortMappings:
+           - ContainerPort: 82
+         Environment:
+          - Name: Port
+            Value: 82
+          - Name: NVM_DIR
+            Value: /usr/local/nvm
+          - Name: NODE_VERSION
+            Value: 6.10.3
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+  # @TODO  https://docs.aws.amazon.com/AmazonECS/latest/APIReference//API_ContainerDefinition.html
+  #        LogConfiguration:
+  #          LogDriver: awslogs
+  #          Options:
+  #            awslogs-group: !Ref 'CloudwatchLogsGroup'
+  #            awslogs-region: !Ref 'AWS::Region'
+  #            awslogs-stream-prefix: ecs-storyizer-api
+
+  WebSiteTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      #  HealthCheckPort: 80
+      #  HealthCheckProtocol: HTTP
+      #  HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
+      Name: WebSiteTG80
+      Port: 80
+      Protocol: HTTP
+      VpcId:
+        Fn::ImportValue: !Sub ${BaseStack}-VPCID
+      Tags:
+      - Key: Name
+        Value: WebSite-TG-80
+  apiTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /get_random_word/
+      #  HealthCheckPort: 81
+      #  HealthCheckProtocol: HTTP
+      #  HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        # @todo 404 is odd
+        HttpCode: 404
+      Name: apiTG81
+      Port: 81
+      Protocol: HTTP
+      VpcId:
+        Fn::ImportValue: !Sub ${BaseStack}-VPCID
+      Tags:
+      - Key: Name
+        Value: api-TG-81
+  saveTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /save_paragraph/
+      #    HealthCheckPort: 82
+      #    HealthCheckProtocol: HTTP
+      #    HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        # @todo 404 is odd
+        HttpCode: 404
+      Name: saveTG82
+      Port: 82
+      Protocol: HTTP
+      VpcId:
+        Fn::ImportValue: !Sub ${BaseStack}-VPCID
+      Tags:
+      - Key: Name
+        Value: save-TG-82
+
+  # Defining the ECS Service - Defining how you want to deploy the App (networking, cluster)
+  WebSiteService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - SiteECStask
+      - StoryizerECSListener
+    Properties:
+      Cluster:
+        Fn::ImportValue: !Sub ${BaseStack}-Cluster
+      DesiredCount: 2
+      LoadBalancers:
+        - ContainerName: Storyizer-Site
+          ContainerPort: 80
+          TargetGroupArn: !Ref WebSiteTG
+      Role:
+        Fn::ImportValue: !Sub ${BaseStack}-ECSServiceRole
+      TaskDefinition: !Ref SiteECStask
+  ApiService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ApiECStask
+      - ApiListenerRule
+    Properties:
+      Cluster:
+        Fn::ImportValue: !Sub ${BaseStack}-Cluster
+      DesiredCount: 2
+      LoadBalancers:
+      - ContainerName: Storyizer-API
+        ContainerPort: 81
+        TargetGroupArn: !Ref apiTG
+      Role:
+        Fn::ImportValue: !Sub ${BaseStack}-ECSServiceRole
+      TaskDefinition: !Ref ApiECStask
+  SaveService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - SaveECStask
+      - SaveListenerRule
+    Properties:
+      Cluster:
+        Fn::ImportValue: !Sub ${BaseStack}-Cluster
+      DesiredCount: 1
+      LoadBalancers:
+      - ContainerName: Storyizer-Save
+        ContainerPort: 82
+        TargetGroupArn: !Ref saveTG
+      Role:
+        Fn::ImportValue: !Sub ${BaseStack}-ECSServiceRole
+      TaskDefinition: !Ref SaveECStask
+Outputs:
+  Region:
+    Value: !Ref AWS::Region
+    Description: Region used for the lab
+  elbDNS:
+    Description: The Public DNS name for the ALB infront of the ECS Cluster
+    Value:
+      Fn::ImportValue: !Sub ${BaseStack}-ELBDNS
